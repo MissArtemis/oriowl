@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>OwlTrace · 鹰迹地图</title>
+  <style>
+    *{box-sizing:border-box}html,body,#map{margin:0;width:100%;height:100%;overflow:hidden;background:#edece4;font-family:system-ui,sans-serif}
+    #demo{position:absolute;inset:0;background:#eaece0}#demo svg{width:100%;height:100%;object-fit:cover}
+    .demo-label{position:absolute;top:25%;left:0;right:0;text-align:center;color:#567267;font-size:12px;letter-spacing:3px}
+    .demo-note{letter-spacing:0;color:#73887e;font-size:11px;margin-top:9px}
+    .pin{position:absolute;border:0;box-shadow:0 5px 15px #254e3520;background:white;color:#354c40;border-radius:18px;padding:11px 16px;font-size:13px;font-weight:600}
+    .pin:before{content:'●';color:#39765a;padding-right:7px}.pin small{display:block;font-weight:400;font-size:10px;color:#8b978e;padding-top:3px}
+    .marker{border:3px solid white;background:#208b91;color:white;border-radius:13px;padding:7px 9px;box-shadow:0 3px 10px #0003;white-space:nowrap;font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+    .selected-pin{width:22px;height:22px;border-radius:50%;background:#ec8e63;border:4px solid white;box-shadow:0 0 0 9px #ec8e6326}
+    .location-pin{width:18px;height:18px;border-radius:50%;background:#438ddd;border:3px solid white;box-shadow:0 0 0 11px #438ddd26}
+    #error{display:none;position:absolute;top:24%;left:8%;right:8%;padding:24px;background:#fff;border-radius:20px;color:#526658;text-align:center;line-height:1.8}
+    .amap-logo,.amap-copyright{bottom:218px!important}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="demo" hidden>
+    <svg viewBox="0 0 430 750" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <rect width="430" height="750" fill="#eceee3"/>
+      <path d="M285 -40C140 80 355 160 240 270S205 400 310 460S300 620 160 800" fill="none" stroke="#b5d7d7" stroke-width="85"/>
+      <g fill="#d4dfcb"><path d="M20 100L155 70L182 180L53 224Z"/><path d="M5 380L99 343L180 439L91 512L0 450Z"/><path d="M308 255L419 224L468 340L336 375Z"/><path d="M241 604L389 571L428 700L277 729Z"/></g>
+      <g fill="none" stroke="#fffdf7" stroke-width="11"><path d="M-50 245L450 62M-60 560L465 395M-40 735L460 565M37 -30L265 780M379 -20L94 810"/></g>
+      <g fill="none" stroke="#dedfcf" stroke-width="1.5"><path d="M-50 245L450 62M-60 560L465 395M-40 735L460 565M37 -30L265 780M379 -20L94 810"/></g>
+    </svg>
+    <div class="demo-label">下一站，会遇见什么？<div class="demo-note">示意背景 · 选择一个演示地点试试</div></div>
+  </div>
+  <div id="error"></div>
+  <script src="/map/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "OwlTrace · 鹰迹",
+    "slug": "oriowl-travel-journal",
+    "version": "0.1.0",
+    "scheme": "oriowl",
+    "orientation": "portrait",
+    "icon": "./assets/owltrace-mark.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.oriowl.traveljournal",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA"
+      ],
+      "adaptiveIcon": {
+        "backgroundColor": "#E3F4F1",
+        "foregroundImage": "./assets/owltrace-mark.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/owltrace-mark.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "选择旅行照片，添加到你的私人相册。",
+          "cameraPermission": "拍下眼前的风景，保存旅行回忆。",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "显示你在地图上的位置，为旅行回忆添加足迹。",
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
+      "expo-font",
+      "expo-secure-store",
+      ["expo-media-library", {
+        "photosPermission": "读取旅行照片的拍摄地点，生成地图足迹。",
+        "granularPermissions": ["photo"],
+        "isAccessMediaLocationEnabled": true
+      }]
+    ]
+  }
+}
