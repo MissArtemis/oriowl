@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -7,6 +8,14 @@ from dotenv import dotenv_values
 
 API_ROOT = Path(__file__).resolve().parents[1]
 KEY_PATTERN = re.compile(r"[a-zA-Z0-9]{32}")
+
+
+def read_photo_limit() -> int:
+    product = json.loads((API_ROOT.parent / "config" / "product.json").read_text(encoding="utf-8"))
+    limit = product["maxPhotosPerNote"]
+    if type(limit) is not int or limit < 1:
+        raise ValueError("config/product.json: maxPhotosPerNote must be a positive integer")
+    return limit
 
 
 @dataclass(frozen=True)

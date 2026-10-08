@@ -69,7 +69,7 @@ export function BackendSettings() {
       <Text style={[styles.text, { fontWeight: '600' }]}>服务设置</Text>
       <Text style={styles.muted}>当前连接：{apiUrl}</Text>
       <Text style={styles.muted}>当前扫码电脑：{defaultApiUrl()}</Text>
-      <Text style={styles.muted}>调试版本：10.09-1 · 原图与实时位置</Text>
+      <Text style={styles.muted}>调试版本：10.09-2 · 系统原图选择</Text>
       <TextInput
         accessibilityLabel="后端服务地址"
         value={url}

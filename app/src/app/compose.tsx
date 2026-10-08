@@ -3,9 +3,9 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DraftLocation } from '../components/compose/DraftLocation';
 import { PhotoGrid } from '../components/compose/PhotoGrid';
-import { OriginalPhotoPicker } from '../components/compose/OriginalPhotoPicker';
 import { PublishButton } from '../components/compose/PublishButton';
 import { useComposeDraft } from '../lib/useComposeDraft';
+import { maxPhotosPerNote } from '../lib/photoConfig';
 import { categories } from '../lib/types';
 import { Badge, Button, IconButton } from '../ui/components';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -18,7 +18,7 @@ export default function ComposeScreen() {
       <View style={[styles.between, { padding: 18 }]}>
         <IconButton icon="x" label="关闭发布" onPress={draft.close} />
         <Text style={[styles.text, { fontWeight: '700' }]}>留下一段旅程</Text>
-        <Badge text={`${draft.photos.length}/9 照片`} />
+        <Badge text={`${draft.photos.length}/${maxPhotosPerNote} 照片`} />
       </View>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="always" contentContainerStyle={{ padding: 22, gap: 16 }}>
@@ -40,7 +40,7 @@ export default function ComposeScreen() {
             />
           </View>
           <Text style={styles.muted}>{Platform.OS === 'android'
-            ? '从相机原图目录选择照片，保留拍摄坐标；选取后自动更新笔记位置。'
+            ? '在系统选择器进入手机存储 → DCIM → Camera，选择相机原图；选取后自动更新笔记位置。'
             : '导入照片原文件，保留拍摄坐标与时间；选取后自动更新笔记位置。'}</Text>
           <PhotoGrid photos={draft.photos} remove={draft.removePhoto} choose={draft.choosePhoto} activeUri={draft.locationPhotoUri} />
           <TextInput
@@ -102,7 +102,6 @@ export default function ComposeScreen() {
           />
         </View>
       </KeyboardAvoidingView>
-      <OriginalPhotoPicker picker={draft.originalPicker} />
       <ConfirmDialog
         visible={draft.discard}
         text="放弃这篇未发布的笔记？"

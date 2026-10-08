@@ -22,6 +22,7 @@ function loadNative(mocks) {
   const modules = new Map();
   const load = (filename) => {
     if (mocks.has(filename)) return mocks.get(filename);
+    if (filename.endsWith('.json')) return JSON.parse(readFileSync(filename, 'utf8'));
     if (modules.has(filename)) return modules.get(filename).exports;
     const module = { exports: {} };
     modules.set(filename, module);
@@ -34,7 +35,7 @@ function loadNative(mocks) {
       if (mocks.has(name)) return mocks.get(name);
       if (!name.startsWith('.')) return appRequire(name);
       const path = resolve(dirname(filename), name);
-      return load(/\.tsx?$/.test(path) ? path : path + (name.endsWith('Context') ? '.tsx' : '.ts'));
+      return load(/\.(tsx?|json)$/.test(path) ? path : path + (name.endsWith('Context') ? '.tsx' : '.ts'));
     };
     vm.runInThisContext(`(function(exports,require,module){${code}\n})`, { filename })(module.exports, require, module);
     return module.exports;
@@ -59,10 +60,10 @@ async function nativeDraft(t, fixture, options = {}) {
   const values = new Map(), routes = [], requests = [], reverse = [];
   let rejectSync, notes, draft, renderer;
   class ApiError extends Error { constructor(message, status) { super(message); this.status = status; } }
-  const selected = pathToFileURL(resolve(root, 'scripts/fixtures', fixture)).href;
   const folder = 'content://com.android.externalstorage.documents/tree/primary%3ADCIM%2FCamera';
   const contentUri = (name) => folder + '/document/' + encodeURIComponent('primary:DCIM/Camera/' + name);
-  const fixtures = options.fixtures || [fixture];
+  let selection = options.selection || [fixture];
+  const pickerOptions = [];
   const sourcePath = (uri) => uri.startsWith('content:')
     ? resolve(root, 'scripts/fixtures', decodeURIComponent(uri.split('/document/')[1]).split('/').at(-1))
     : fileURLToPath(uri);
@@ -74,8 +75,10 @@ async function nativeDraft(t, fixture, options = {}) {
       Image: { getSize: (_, success) => success(300, 400) } }],
     ['expo-router', { router: { replace: (route) => routes.push(route), canGoBack: () => false } }],
     ['@react-native-async-storage/async-storage', storage(values)],
-    ['expo-document-picker', { getDocumentAsync: async () => ({ canceled: false,
-      assets: [{ uri: selected, mimeType: 'image/jpeg' }] }) }],
+    ['expo-document-picker', { getDocumentAsync: async (opts) => {
+      pickerOptions.push(opts);
+      return { canceled: false, assets: selection.map((name) => ({ uri: contentUri(name), name, mimeType: 'image/jpeg' })) };
+    } }],
     ['expo-image-picker', {}], ['expo-media-library/legacy', {}],
     ['expo-file-system', { File: class {
       constructor(uri) { this.path = fileURLToPath(uri); }
@@ -86,8 +89,8 @@ async function nativeDraft(t, fixture, options = {}) {
       cacheDirectory: pathToFileURL(directory + sep).href,
       EncodingType: { Base64: 'base64' },
       StorageAccessFramework: {
-        requestDirectoryPermissionsAsync: async () => ({ granted: true, directoryUri: folder }),
-        readDirectoryAsync: async () => fixtures.map(contentUri),
+        requestDirectoryPermissionsAsync: async () => { throw new Error('must not request access to the whole camera directory'); },
+        readDirectoryAsync: async () => { throw new Error('must not list unselected photos'); },
       },
       readAsStringAsync: async (uri, { position, length }) => (await readFile(sourcePath(uri))).subarray(position, position + length).toString('base64'),
       getInfoAsync: async (uri) => ({ exists: true, isDirectory: false, size: statSync(sourcePath(uri)).size }),
@@ -110,6 +113,7 @@ async function nativeDraft(t, fixture, options = {}) {
     [resolve(root, 'app/src/context/TravelContext.tsx'), { useTravel: () => ({ ...notes,
       apiUrl: 'http://192.168.31.138:8081', selectedPlace: options.initialPlace || null, currentPlace: null, notify() {} }) }],
   ]);
+  if (options.photoLimit) mocks.set(resolve(root, 'config/product.json'), { maxPhotosPerNote: options.photoLimit });
   const load = loadNative(mocks);
   const { useNotes } = load('lib/useNotes.ts');
   const { useComposeDraft } = load('lib/useComposeDraft.ts');
@@ -126,20 +130,26 @@ async function nativeDraft(t, fixture, options = {}) {
   });
   assert.ok(notes.ready && notes.syncing, 'background synchronization is waiting on an unreachable API');
   const select = async (names, source) => {
-    let pending;
-    await act(async () => { pending = draft.pick(source); });
-    for (let attempt = 0; draft.originalPicker.busy && attempt < 100; attempt++) {
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
-    }
-    assert.equal(draft.originalPicker.visible, true);
-    assert.equal(draft.originalPicker.busy, false);
-    for (const name of names) await act(async () => { draft.originalPicker.toggle(contentUri(name)); });
-    await act(async () => { await draft.originalPicker.confirm(); await pending; });
+    selection = names;
+    await act(async () => { await draft.pick(source); });
+    assert.equal(draft.busy, false);
   };
   await select(options.selection || [fixture]);
   await act(async () => { draft.setTitle('带照片离线发布'); draft.setBody('真实原图测试'); });
-  return { get draft() { return draft; }, get notes() { return notes; }, routes, requests, values, select, reverse };
+  return { get draft() { return draft; }, get notes() { return notes; }, routes, requests, values, select, reverse, pickerOptions };
 }
+
+test('changing the product photo limit updates remaining selection and blocks extra photos', async (t) => {
+  const app = await nativeDraft(t, 'gps-photo.jpg', { photoLimit: 2 });
+  assert.equal(app.pickerOptions[0].multiple, true);
+  await app.select(['gps-photo-2.jpg']);
+  assert.equal(app.pickerOptions[1].multiple, false, 'one remaining slot uses single selection');
+  assert.equal(app.draft.photos.length, 2);
+  await app.select(['no-gps-photo.jpg']);
+  assert.equal(app.pickerOptions.length, 2, 'the system picker is not opened when the note is full');
+  assert.equal(app.draft.error, '每篇笔记最多 2 张照片');
+  assert.equal(app.draft.photos.length, 2);
+});
 
 test('Android photo draft publishes with GPS and no selected map place while background sync hangs', async (t) => {
   const app = await nativeDraft(t, 'gps-photo.jpg');

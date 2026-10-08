@@ -9,6 +9,7 @@ import { cameraPhotoName, isCameraDirectory, originalImageMimeFromBase64 } from 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const folder = (id = 'primary:DCIM/Camera') => 'content://com.android.externalstorage.documents/tree/' + encodeURIComponent(id);
 const file = (name, dir = 'primary:DCIM/Camera') => folder(dir) + '/document/' + encodeURIComponent(dir + '/' + name);
+const document = (name, dir = 'primary:DCIM/Camera') => 'content://com.android.externalstorage.documents/document/' + encodeURIComponent(dir + '/' + name);
 
 test('only the exact Camera directory and its direct photo files can be selected', () => {
   assert.equal(isCameraDirectory(folder()), true);
@@ -19,9 +20,15 @@ test('only the exact Camera directory and its direct photo files can be selected
   assert.equal(isCameraDirectory(folder().replace('com.android.externalstorage.documents', 'other.provider')), false);
   assert.equal(cameraPhotoName(file('IMG_20261009.jpg')), 'IMG_20261009.jpg');
   assert.equal(cameraPhotoName(file('照片.HEIC')), '照片.HEIC');
+  assert.equal(cameraPhotoName(document('照片.HEIC')), '照片.HEIC');
+  assert.equal(cameraPhotoName(document('IMG.jpg', 'ABCD-1234:DCIM/Camera')), 'IMG.jpg');
   for (const name of ['nested/picture.jpg', '../picture.jpg', '.hidden.jpg', 'movie.mp4', 'document.pdf', 'picture.jpg.exe'])
     assert.equal(cameraPhotoName(file(name)), undefined, name);
   assert.equal(cameraPhotoName(file('photo.jpg', 'primary:Pictures')), undefined);
+  for (const uri of [document('x.jpg', 'primary:Pictures'), document('child/x.jpg'), document('../x.jpg'),
+    document('x.jpg') + '?other=folder', document('x.jpg').replace('com.android.externalstorage.documents', 'other.provider'),
+    document('movie.mp4'), document('.hidden.jpg'), document('a\\x.jpg')])
+    assert.equal(cameraPhotoName(uri), undefined, uri);
 });
 
 test('image filtering checks original bytes rather than trusting a .jpg name or browser globals', async () => {
@@ -33,40 +40,110 @@ test('image filtering checks original bytes rather than trusting a .jpg name or 
   assert.equal(originalImageMimeFromBase64('not@base64'), undefined);
 });
 
-test('wrong-directory authorization is rejected before any listing or photo copy', async () => {
-  let listings = 0, copies = 0, persisted = false;
-  const picker = loadTs(resolve(root, 'app/src/lib/cameraOriginals.ts'), new Map([
-    ['@react-native-async-storage/async-storage', { getItem: async () => null, setItem: async () => { persisted = true; } }],
-    ['react-native', { Image: {} }],
-    ['expo-file-system/legacy', { StorageAccessFramework: {
-      requestDirectoryPermissionsAsync: async () => ({ granted: true, directoryUri: folder('primary:Pictures') }),
-      readDirectoryAsync: async () => { listings++; return []; },
-    }, copyAsync: async () => { copies++; } }],
+function systemPicker(getDocumentAsync, copyCameraOriginals, limit = 9) {
+  return loadTs(resolve(root, 'app/src/lib/originalPhotos.ts'), new Map([
+    ['expo-document-picker', { getDocumentAsync }],
+    ['react-native', { Platform: { OS: 'android' }, Image: {} }],
+    [resolve(root, 'config/product.json'), { maxPhotosPerNote: limit }],
+    [resolve(root, 'app/src/lib/cameraOriginals.ts'), { copyCameraOriginals }],
   ]));
-  await assert.rejects(picker.loadCameraOriginals(), /只允许相机原图目录/);
-  assert.equal(listings, 0); assert.equal(copies, 0); assert.equal(persisted, false);
+}
+
+test('the system picker opens immediately and reads only confirmed, deduplicated originals', async () => {
+  let resolvePick, calls = 0, copied = [];
+  const picker = systemPicker((opts) => {
+    calls++;
+    assert.equal(opts.copyToCacheDirectory, false, 'original provenance must remain available');
+    assert.equal(opts.multiple, true);
+    assert.ok(opts.type.every((type) => type.startsWith('image/')));
+    return new Promise((resolve) => { resolvePick = resolve; });
+  }, async (files) => { copied = files; return files; });
+  const pending = picker.originalPhotos(9);
+  assert.equal(calls, 1, 'opening does not wait on directory permissions, listing, or photo headers');
+  assert.equal(copied.length, 0);
+  const asset = { uri: document('IMG.jpg'), name: 'IMG.jpg', mimeType: 'image/jpeg', size: 500 };
+  resolvePick({ canceled: false, assets: [asset, asset] });
+  assert.equal((await pending).length, 1);
+  assert.deepEqual(copied, [asset]);
 });
 
-test('the camera gallery excludes non-images, nested folders, renamed text, and duplicate entries', async () => {
-  const jpeg = await readFile(resolve(root, 'scripts/fixtures/gps-photo.jpg'));
-  const candidate = file('IMG_20261009.jpg');
-  const headersRead = [];
+test('cancel, excess selection, wrong folder and non-image files do not read or copy photos', async () => {
+  let result, opts, copies = 0;
+  const picker = systemPicker(async (options) => { opts = options; return result; }, async () => { copies++; return []; }, 2);
+  result = { canceled: true, assets: null };
+  assert.deepEqual(await picker.originalPhotos(2), []);
+  result = { canceled: false, assets: ['a', 'b', 'c'].map((name) => ({ uri: document(name + '.jpg'), name: name + '.jpg' })) };
+  await assert.rejects(picker.originalPhotos(100), /最多还能添加 2 张/);
+  for (const asset of [
+    { uri: document('x.jpg', 'primary:Pictures'), name: 'x.jpg', mimeType: 'image/jpeg' },
+    { uri: document('x.jpg'), name: 'x.jpg', mimeType: 'application/pdf' },
+    { uri: document('child/x.jpg'), name: 'x.jpg', mimeType: 'image/jpeg' },
+    { uri: document('x.jpg'), name: 'x.jpg', size: 31 * 1024 * 1024 },
+  ]) {
+    result = { canceled: false, assets: [asset] };
+    await assert.rejects(picker.originalPhotos(1));
+    assert.equal(opts.multiple, false);
+  }
+  assert.equal(copies, 0);
+});
+
+test('renamed text is rejected by selected-file signature before copying', async () => {
+  let copies = 0;
   const picker = loadTs(resolve(root, 'app/src/lib/cameraOriginals.ts'), new Map([
-    ['@react-native-async-storage/async-storage', { getItem: async () => folder(), setItem: async () => {} }],
     ['react-native', { Image: {} }],
-    ['expo-file-system/legacy', { EncodingType: { Base64: 'base64' },
-      StorageAccessFramework: { readDirectoryAsync: async () => [candidate, candidate, file('note.jpg'), file('dir.jpg'),
-        file('child/a.jpg'), file('movie.mp4'), file('other.jpg', 'primary:Pictures')] },
-      readAsStringAsync: async (uri, opts) => {
-        headersRead.push(uri);
+    ['expo-file-system/legacy', { cacheDirectory: 'file:///cache/', EncodingType: { Base64: 'base64' },
+      makeDirectoryAsync: async () => {}, deleteAsync: async () => {},
+      readAsStringAsync: async (_, opts) => {
         assert.equal(opts.length, 64); assert.equal(opts.position, 0);
-        if (uri === file('dir.jpg')) throw new Error('is a directory');
-        return (uri === candidate ? jpeg : Buffer.from('not a photo')).subarray(0, 64).toString('base64');
-      },
-    }],
+        return Buffer.from('not a photo').toString('base64');
+      }, copyAsync: async () => { copies++; } }],
   ]));
-  assert.deepEqual(await picker.loadCameraOriginals(), [{ uri: candidate, name: 'IMG_20261009.jpg', mimeType: 'image/jpeg' }]);
-  assert.equal(headersRead.length, 3);
+  await assert.rejects(picker.copyCameraOriginals([{ uri: document('text.jpg'), name: 'text.jpg' }]), /不是支持的照片/);
+  assert.equal(copies, 0);
+});
+
+test('a hung selected-file read times out and cleanup waits for the native operation to settle', async () => {
+  const jpeg = await readFile(resolve(root, 'scripts/fixtures/gps-photo.jpg'));
+  const io = loadTs(resolve(root, 'app/src/lib/originalPhotoIO.ts'), new Map([
+    ['react-native', { Image: { getSize: (_, callback) => callback(300, 400) } }],
+  ]));
+  let finishRead, deletions = 0, copies = 0;
+  const picker = loadTs(resolve(root, 'app/src/lib/cameraOriginals.ts'), new Map([
+    [resolve(root, 'app/src/lib/originalPhotoIO.ts'), { ...io,
+      photoReadTimeout: (promise, message) => io.photoReadTimeout(promise, message, 25) }],
+    ['expo-file-system/legacy', { cacheDirectory: 'file:///cache/', EncodingType: { Base64: 'base64' },
+      makeDirectoryAsync: async () => {},
+      readAsStringAsync: () => new Promise((resolve) => { finishRead = resolve; }),
+      copyAsync: async () => { copies++; }, getInfoAsync: async () => ({ exists: true, size: jpeg.length }),
+      deleteAsync: async () => { deletions++; } }],
+  ]));
+  await assert.rejects(picker.copyCameraOriginals([{ uri: document('IMG.jpg'), name: 'IMG.jpg' }]), /第 1 张原图读取超时/);
+  assert.equal(deletions, 0, 'do not race cleanup against an unfinished native copy');
+  finishRead(jpeg.subarray(0, 64).toString('base64'));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(copies, 1); assert.equal(deletions, 1);
+});
+
+test('camera capture reads original-file GPS without requesting media-library access', async () => {
+  let mediaRequests = 0;
+  const { photoMetadataBytes } = await import('../app/src/lib/photoMetadataBytes.ts');
+  const bytes = new Uint8Array(await readFile(resolve(root, 'scripts/fixtures/gps-photo.jpg')));
+  const picker = loadTs(resolve(root, 'app/src/lib/photoPicker.ts'), new Map([
+    ['react-native', { Image: {} }],
+    ['expo-image-picker', { requestCameraPermissionsAsync: async () => ({ granted: true }),
+      launchCameraAsync: async (options) => {
+        assert.equal(options.quality, 1); assert.equal(options.allowsEditing, false); assert.equal(options.exif, true);
+        return { canceled: false, assets: [{ uri: 'file:///camera.jpg', assetId: 'camera-asset', width: 300, height: 400 }] };
+      } }],
+    ['expo-media-library/legacy', { requestPermissionsAsync: async () => { mediaRequests++; throw new Error('unsupported'); } }],
+    [resolve(root, 'app/src/lib/originalPhotos.ts'), { originalPhotos: async () => { throw new Error('camera must not open file picker'); } }],
+    [resolve(root, 'app/src/lib/readPhotoMetadata.ts'), { readPhotoMetadata: async () => photoMetadataBytes(bytes) }],
+  ]));
+  const photos = await picker.pickPhotos('camera', 1);
+  assert.equal(mediaRequests, 0);
+  assert.equal(photos[0].gps.longitude, 120.1);
+  assert.equal(photos[0].gps.latitude, 30.2);
+  assert.ok(photos[0].capturedAt.startsWith('2026-10-08'));
 });
 
 test('server backup keeps the user-selected photo location rather than changing back to the first photo', async () => {

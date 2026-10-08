@@ -10,6 +10,7 @@ const ts = appRequire('typescript');
 // Native adapters can be substituted; production code keeps platform resolution.
 export function loadTs(filename, overrides = new Map(), cache = new Map()) {
   if (overrides.has(filename)) return overrides.get(filename);
+  if (filename.endsWith('.json')) return JSON.parse(readFileSync(filename, 'utf8'));
   if (cache.has(filename)) return cache.get(filename).exports;
   const module = { exports: {} };
   cache.set(filename, module);
@@ -20,7 +21,7 @@ export function loadTs(filename, overrides = new Map(), cache = new Map()) {
     if (overrides.has(name)) return overrides.get(name);
     if (!name.startsWith('.')) return appRequire(name);
     const path = resolve(dirname(filename), name);
-    return loadTs(/\.tsx?$/.test(path) ? path : path + '.ts', overrides, cache);
+    return loadTs(/\.(tsx?|json)$/.test(path) ? path : path + '.ts', overrides, cache);
   };
   vm.runInThisContext(`(function(exports,require,module){${code}\n})`, { filename })(module.exports, require, module);
   return module.exports;

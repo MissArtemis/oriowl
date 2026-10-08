@@ -1,10 +1,9 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library/legacy';
-import { Platform } from 'react-native';
 import type { Coordinates, Photo } from './types';
 import { readPhotoMetadata } from './readPhotoMetadata';
 import { originalPhotos } from './originalPhotos';
 import { photoPlace } from './draftPlace';
+import { photoReadTimeout } from './originalPhotoIO';
 
 function decimal(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -28,27 +27,14 @@ export function exifGps(exif: ImagePicker.ImagePickerAsset['exif']): Coordinates
     return { latitude, longitude };
 }
 
-async function assetPhoto(asset: ImagePicker.ImagePickerAsset): Promise<Photo> {
-  const photo: Photo = {
+function assetPhoto(asset: ImagePicker.ImagePickerAsset): Photo {
+  return {
     uri: asset.uri,
     width: asset.width,
     height: asset.height,
     mimeType: asset.mimeType || 'image/jpeg',
     gps: exifGps(asset.exif),
   };
-  if (!photo.gps && asset.assetId && Platform.OS !== 'web') {
-    try {
-      const permission = await MediaLibrary.requestPermissionsAsync(false, ['photo']);
-      if (permission.granted) {
-        const info = await MediaLibrary.getAssetInfoAsync(asset.assetId);
-        if (info.location) photo.gps = info.location;
-        if (info.creationTime) photo.capturedAt = new Date(info.creationTime).toISOString();
-      }
-    } catch {
-      /* A limited photo picker may not expose the original library asset. */
-    }
-  }
-  return photo;
 }
 
 export async function pickPhotos(
@@ -67,7 +53,7 @@ export async function pickPhotos(
   const result = source === 'camera' ? await ImagePicker.launchCameraAsync(options) : null;
   if (result?.canceled) return [];
   const selected = result
-    ? await Promise.all(result.assets.slice(0, limit).map(assetPhoto))
+    ? result.assets.slice(0, limit).map(assetPhoto)
     : await selectOriginals(limit);
   if (!selected.length) return [];
   // Importing and reading GPS is entirely local. Uploads run after publishing
@@ -75,7 +61,7 @@ export async function pickPhotos(
   const photos: Photo[] = [];
   for (let photo of selected) {
     try {
-      const metadata = await readPhotoMetadata(photo.uri);
+      const metadata = await photoReadTimeout(readPhotoMetadata(photo.uri), '照片拍摄信息读取超时');
       photo.gps ||= metadata.gps;
       photo.capturedAt ||= metadata.capturedAt;
     } catch {

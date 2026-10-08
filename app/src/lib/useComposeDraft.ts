@@ -6,7 +6,7 @@ import { useTravel } from '../context/TravelContext';
 import { errorMessage, request } from './api';
 import { pickPhotos } from './photoPicker';
 import { draftPlace, photoPlace } from './draftPlace';
-import { useOriginalPhotoPicker } from './useOriginalPhotoPicker';
+import { maxPhotosPerNote } from './photoConfig';
 import type { Category, Photo, Place } from './types';
 
 export function useComposeDraft() {
@@ -17,7 +17,6 @@ export function useComposeDraft() {
   const [manual, setManual] = useState(false);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [locationPhotoUri, setLocationPhotoUri] = useState<string | null>(null);
-  const originalPicker = useOriginalPhotoPicker();
   const locationPhoto = photos.find((photo) => photo.uri === locationPhotoUri && photoPlace(photo)) ||
     photos.find((photo) => photoPlace(photo));
   const photoLocation = locationPhoto ? photoPlace(locationPhoto) : undefined;
@@ -61,15 +60,15 @@ export function useComposeDraft() {
   }, [close]);
   const pick = async (source: 'camera' | 'library' | 'original' = 'original') => {
     if (working.current) return;
-    if (photos.length >= 9) {
-      setError('每篇笔记最多 9 张照片');
+    if (photos.length >= maxPhotosPerNote) {
+      setError(`每篇笔记最多 ${maxPhotosPerNote} 张照片`);
       return;
     }
     working.current = true;
     setBusy(true);
     setError('');
     try {
-      const added = await pickPhotos(source, 9 - photos.length, originalPicker.request);
+      const added = await pickPhotos(source, maxPhotosPerNote - photos.length);
       if (!added.length) return;
       const next = [...photos, ...added];
       setPhotos(next);
@@ -162,6 +161,5 @@ export function useComposeDraft() {
     usePhotoLocation: () => { if (locationPhoto) choosePhoto(locationPhoto.uri); },
     locationPhotoUri: manual ? undefined : locationPhoto?.uri,
     photoLocation,
-    originalPicker,
   };
 }

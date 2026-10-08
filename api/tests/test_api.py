@@ -1,17 +1,47 @@
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from owltrace.config import Config
+from owltrace.config import read_photo_limit
 from owltrace.main import app
+from owltrace.models import NoteInput
 
 CONFIG = Config(js_key="a" * 32, js_secret="b" * 32, web_key="c" * 32)
 
 
 class ApiTests(unittest.TestCase):
+    def test_note_photo_limit_uses_product_config_and_enforces_the_boundary(self):
+        limit = read_photo_limit()
+        note = {"title": "原图测试", "place": {"longitude": 120, "latitude": 30, "name": "拍摄地点"}}
+        self.assertEqual(NoteInput.model_json_schema()["properties"]["photoIds"]["maxItems"], limit)
+        NoteInput(**note, photoIds=[f"photo-{index}" for index in range(limit)])
+        with self.assertRaises(ValidationError):
+            NoteInput(**note, photoIds=[f"photo-{index}" for index in range(limit + 1)])
+        # Import the actual model in a fresh interpreter with a different
+        # configuration; do not reload live FastAPI routes during the test.
+        subprocess.run([sys.executable, "-c", """
+from unittest.mock import patch
+from pydantic import ValidationError
+with patch('owltrace.config.read_photo_limit', return_value=2):
+    from owltrace.models import NoteInput
+    assert NoteInput.model_json_schema()['properties']['photoIds']['maxItems'] == 2
+    note = {'title': 'test', 'place': {'longitude': 120, 'latitude': 30, 'name': 'test'}}
+    NoteInput(**note, photoIds=['a', 'b'])
+    try:
+        NoteInput(**note, photoIds=['a', 'b', 'c'])
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError('photo limit was hardcoded instead of configured')
+"""], check=True, capture_output=True, text=True)
+
     def setUp(self):
         self.config = patch("owltrace.maps.read_config", return_value=CONFIG)
         self.config.start()
