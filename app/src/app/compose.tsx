@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DraftLocation } from '../components/compose/DraftLocation';
 import { PhotoGrid } from '../components/compose/PhotoGrid';
+import { OriginalPhotoPicker } from '../components/compose/OriginalPhotoPicker';
 import { PublishButton } from '../components/compose/PublishButton';
 import { useComposeDraft } from '../lib/useComposeDraft';
 import { categories } from '../lib/types';
@@ -24,9 +25,9 @@ export default function ComposeScreen() {
           <View style={[styles.row, { gap: 12 }]}>
             <Button
               secondary
-              label="从相册添加"
+              label="添加原图"
               icon="image"
-              onPress={() => void draft.pick('library')}
+              onPress={() => void draft.pick()}
               busy={draft.busy}
               style={{ flex: 1 }}
             />
@@ -38,15 +39,10 @@ export default function ComposeScreen() {
               disabled={draft.busy}
             />
           </View>
-          <Button
-            secondary
-            label="导入原图 · 读取拍摄地点"
-            icon="folder"
-            onPress={() => void draft.pick('original')}
-            disabled={draft.busy}
-          />
-          <Text style={styles.muted}>相册未读到位置时，可从手机存储 DCIM/Camera 选择相机原图。</Text>
-          <PhotoGrid photos={draft.photos} remove={draft.removePhoto} choose={draft.choosePlace} />
+          <Text style={styles.muted}>{Platform.OS === 'android'
+            ? '从相机原图目录选择照片，保留拍摄坐标；选取后自动更新笔记位置。'
+            : '导入照片原文件，保留拍摄坐标与时间；选取后自动更新笔记位置。'}</Text>
+          <PhotoGrid photos={draft.photos} remove={draft.removePhoto} choose={draft.choosePhoto} activeUri={draft.locationPhotoUri} />
           <TextInput
             accessibilityLabel="笔记标题"
             placeholder="给这段回忆起个名字（可选）"
@@ -68,7 +64,8 @@ export default function ComposeScreen() {
           <DraftLocation
             place={draft.place}
             current={draft.currentPlace}
-            photoPlace={draft.photos.find((photo) => photo.place)?.place}
+            photoPlace={draft.photoLocation}
+            usePhoto={draft.usePhotoLocation}
             choose={draft.choosePlace}
           />
           <View style={[styles.row, { gap: 8 }]}>
@@ -105,6 +102,7 @@ export default function ComposeScreen() {
           />
         </View>
       </KeyboardAvoidingView>
+      <OriginalPhotoPicker picker={draft.originalPicker} />
       <ConfirmDialog
         visible={draft.discard}
         text="放弃这篇未发布的笔记？"

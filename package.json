@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "qr": "node app/scripts/qr.mjs",
-    "check": "npm --prefix app run typecheck && npm --prefix app run lint && node scripts/check-api.mjs && node --test scripts/test-map.mjs && node --experimental-strip-types --test scripts/test-mobile.mjs scripts/test-note-sync.mjs scripts/test-native-publish.mjs scripts/test-network.mjs"
+    "check": "npm --prefix app run typecheck && npm --prefix app run lint && node scripts/check-api.mjs && node --test scripts/test-map.mjs && node --experimental-strip-types --test scripts/test-mobile.mjs scripts/test-note-sync.mjs scripts/test-native-publish.mjs scripts/test-network.mjs scripts/test-original-photos.mjs"
   },
   "engines": { "node": ">=22.13.0" }
 }

@@ -17,6 +17,7 @@ export function loadTs(filename, overrides = new Map(), cache = new Map()) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   const require = (name) => {
+    if (overrides.has(name)) return overrides.get(name);
     if (!name.startsWith('.')) return appRequire(name);
     const path = resolve(dirname(filename), name);
     return loadTs(/\.tsx?$/.test(path) ? path : path + '.ts', overrides, cache);

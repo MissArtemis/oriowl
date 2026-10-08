@@ -47,7 +47,7 @@ function storage(values = new Map()) {
     setItem: async (key, value) => { values.set(key, value); } };
 }
 
-async function nativeDraft(t, fixture) {
+async function nativeDraft(t, fixture, options = {}) {
   const localRoot = resolve(root, '.local');
   await mkdir(localRoot, { recursive: true });
   const directory = await mkdtemp(resolve(localRoot, 'native-publish-'));
@@ -56,10 +56,16 @@ async function nativeDraft(t, fixture) {
     assert.ok(path.startsWith(directory + sep), 'photo operations must stay in the test directory');
     return path;
   };
-  const values = new Map(), routes = [], requests = [];
+  const values = new Map(), routes = [], requests = [], reverse = [];
   let rejectSync, notes, draft, renderer;
   class ApiError extends Error { constructor(message, status) { super(message); this.status = status; } }
   const selected = pathToFileURL(resolve(root, 'scripts/fixtures', fixture)).href;
+  const folder = 'content://com.android.externalstorage.documents/tree/primary%3ADCIM%2FCamera';
+  const contentUri = (name) => folder + '/document/' + encodeURIComponent('primary:DCIM/Camera/' + name);
+  const fixtures = options.fixtures || [fixture];
+  const sourcePath = (uri) => uri.startsWith('content:')
+    ? resolve(root, 'scripts/fixtures', decodeURIComponent(uri.split('/document/')[1]).split('/').at(-1))
+    : fileURLToPath(uri);
   const mocks = new Map([
     ['react', React],
     ['react-native', { Platform: { OS: 'android' }, Keyboard: { dismiss() {} },
@@ -77,12 +83,21 @@ async function nativeDraft(t, fixture) {
       async arrayBuffer() { const data = await readFile(this.path); return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength); }
     } }],
     ['expo-file-system/legacy', { documentDirectory: pathToFileURL(directory + sep).href,
+      cacheDirectory: pathToFileURL(directory + sep).href,
+      EncodingType: { Base64: 'base64' },
+      StorageAccessFramework: {
+        requestDirectoryPermissionsAsync: async () => ({ granted: true, directoryUri: folder }),
+        readDirectoryAsync: async () => fixtures.map(contentUri),
+      },
+      readAsStringAsync: async (uri, { position, length }) => (await readFile(sourcePath(uri))).subarray(position, position + length).toString('base64'),
+      getInfoAsync: async (uri) => ({ exists: true, isDirectory: false, size: statSync(sourcePath(uri)).size }),
       makeDirectoryAsync: (uri) => mkdir(within(uri), { recursive: true }),
-      copyAsync: ({ from, to }) => copyFile(fileURLToPath(from), within(to)),
+      copyAsync: ({ from, to }) => copyFile(sourcePath(from), within(to)),
       deleteAsync: (uri) => rm(within(uri), { recursive: true, force: true }) }],
     [resolve(root, 'app/src/lib/api.ts'), { ApiError, errorMessage: (error) => error.message,
-      request: async (_, path) => {
+      request: async (_, path, token, opts) => {
         requests.push(path);
+        if (path.startsWith('/api/places/reverse')) return new Promise((resolve) => reverse.push({ resolve, signal: opts.signal, path }));
         if (!rejectSync) return new Promise((_, reject) => { rejectSync = reject; });
         throw new ApiError('离线测试', 0);
       } }],
@@ -93,7 +108,7 @@ async function nativeDraft(t, fixture) {
       } }],
     [resolve(root, 'app/src/context/AuthContext.tsx'), { useAuth: () => ({ user, token: 'fixture-token' }) }],
     [resolve(root, 'app/src/context/TravelContext.tsx'), { useTravel: () => ({ ...notes,
-      apiUrl: 'http://192.168.31.138:8081', selectedPlace: null, currentPlace: null, notify() {} }) }],
+      apiUrl: 'http://192.168.31.138:8081', selectedPlace: options.initialPlace || null, currentPlace: null, notify() {} }) }],
   ]);
   const load = loadNative(mocks);
   const { useNotes } = load('lib/useNotes.ts');
@@ -110,8 +125,20 @@ async function nativeDraft(t, fixture) {
     await rm(directory, { recursive: true, force: true });
   });
   assert.ok(notes.ready && notes.syncing, 'background synchronization is waiting on an unreachable API');
-  await act(async () => { await draft.pick('original'); draft.setTitle('带照片离线发布'); draft.setBody('真实原图测试'); });
-  return { get draft() { return draft; }, get notes() { return notes; }, routes, requests, values };
+  const select = async (names, source) => {
+    let pending;
+    await act(async () => { pending = draft.pick(source); });
+    for (let attempt = 0; draft.originalPicker.busy && attempt < 100; attempt++) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
+    }
+    assert.equal(draft.originalPicker.visible, true);
+    assert.equal(draft.originalPicker.busy, false);
+    for (const name of names) await act(async () => { draft.originalPicker.toggle(contentUri(name)); });
+    await act(async () => { await draft.originalPicker.confirm(); await pending; });
+  };
+  await select(options.selection || [fixture]);
+  await act(async () => { draft.setTitle('带照片离线发布'); draft.setBody('真实原图测试'); });
+  return { get draft() { return draft; }, get notes() { return notes; }, routes, requests, values, select, reverse };
 }
 
 test('Android photo draft publishes with GPS and no selected map place while background sync hangs', async (t) => {
@@ -135,8 +162,48 @@ test('Android photo draft publishes with GPS and no selected map place while bac
     await readFile(resolve(root, 'scripts/fixtures/gps-photo.jpg')));
   assert.equal(saved.photos[0].gps.longitude, 120.1);
   assert.equal(saved.syncStatus, 'pending');
-  assert.ok([...app.values.values()].some((index) => JSON.parse(index)[0]?.id === saved.id));
-  assert.ok(app.requests.every((path) => path === '/health'), 'publication must not wait for photo upload');
+  assert.ok([...app.values.entries()].some(([key, index]) => key.startsWith('@owltrace/notes/v2/') && JSON.parse(index)[0]?.id === saved.id));
+  assert.ok(app.requests.every((path) => path === '/health' || path.startsWith('/api/places/reverse')), 'publication must not wait for photo upload');
+});
+
+test('default original selection updates location before the address request finishes, and ignores stale addresses', async (t) => {
+  const manual = { longitude: 116.4, latitude: 39.9, name: '预选地点', address: '预选地址' };
+  const app = await nativeDraft(t, 'gps-photo.jpg', { initialPlace: manual, fixtures: ['gps-photo.jpg', 'gps-photo-2.jpg'] });
+  assert.notEqual(app.draft.place.longitude, manual.longitude);
+  assert.equal(app.draft.photoLocation, app.draft.photos[0].place);
+  assert.equal(app.draft.place.address, '');
+  assert.equal(app.reverse.length, 1);
+  await act(async () => { app.draft.choosePlace(manual); });
+  assert.equal(app.draft.place, manual);
+  await app.select(['gps-photo-2.jpg'], 'library');
+  assert.ok(Math.abs(app.draft.photos[1].gps.longitude - 121.2) < 1e-9);
+  assert.equal(app.draft.locationPhotoUri, app.draft.photos[1].uri);
+  assert.equal(app.draft.place.longitude, app.draft.photos[1].place.longitude);
+  assert.equal(app.draft.place.address, '');
+  assert.equal(app.reverse[0].signal.aborted, true);
+  await act(async () => { app.reverse[0].resolve({ address: '过期地址' }); });
+  assert.notEqual(app.draft.place.address, '过期地址');
+  await act(async () => { app.reverse.at(-1).resolve({ address: '第二张照片的新地址', city: '测试市' }); });
+  assert.equal(app.draft.place.address, '第二张照片的新地址');
+  await act(async () => { await app.draft.publish(); });
+  assert.equal(app.notes.entries[0].locationPhotoIndex, 1);
+  assert.equal(app.notes.entries[0].place.address, '第二张照片的新地址');
+});
+
+test('choosing and removing a location photo recalculates coordinates without retaining its previous GPS', async (t) => {
+  const fallback = { longitude: 116.4, latitude: 39.9, name: '预选地点', address: '' };
+  const app = await nativeDraft(t, 'gps-photo.jpg', { initialPlace: fallback,
+    fixtures: ['gps-photo.jpg', 'gps-photo-2.jpg'], selection: ['gps-photo.jpg', 'gps-photo-2.jpg'] });
+  const [first, second] = app.draft.photos;
+  await act(async () => { app.draft.choosePhoto(second.uri); });
+  assert.equal(app.draft.place.longitude, second.place.longitude);
+  await act(async () => { app.draft.removePhoto(1); });
+  assert.equal(app.draft.place.longitude, first.place.longitude);
+  assert.equal(app.draft.locationPhotoUri, first.uri);
+  await act(async () => { app.draft.removePhoto(0); });
+  assert.equal(app.draft.place, fallback);
+  assert.equal(app.draft.photoLocation, undefined);
+  assert.equal(app.draft.locationPhotoUri, undefined);
 });
 
 test('a photo without GPS or a selected place reports a visible validation error without losing the draft', async (t) => {

@@ -42,13 +42,14 @@ export type Entry = {
   syncStatus?: 'pending' | 'synced' | 'error';
   syncError?: string;
   locationSource?: 'photo' | 'manual';
+  locationPhotoIndex?: number;
   deletedAt?: string;
   deletionBackup?: boolean;
   restorePending?: boolean;
 };
 export type NewEntry = Pick<
   Entry,
-  'title' | 'body' | 'photos' | 'place' | 'category' | 'visibility' | 'locationSource'
+  'title' | 'body' | 'photos' | 'place' | 'category' | 'visibility' | 'locationSource' | 'locationPhotoIndex'
 >;
 export type ChatMessage = {
   id: string;

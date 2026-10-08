@@ -10,12 +10,14 @@ export function DraftLocation({
   place,
   current,
   photoPlace,
+  usePhoto,
   choose,
 }: {
   place: Place | null;
   current: Place | null;
   photoPlace?: Place;
-  choose: (place: Place, automatic?: boolean) => void;
+  choose: (place: Place) => void;
+  usePhoto: () => void;
 }) {
   const [searching, setSearching] = useState(false);
   return (
@@ -29,11 +31,11 @@ export function DraftLocation({
           {place.longitude.toFixed(6)}, {place.latitude.toFixed(6)}
         </Text>
       )}
-      {place && !place.address && <Text style={styles.muted}>拍摄坐标已可用于发布，联网后补充地址。</Text>}
+      {place && !place.address && <Text style={styles.muted}>坐标已可用于发布，联网后补充地址。</Text>}
       <View style={[styles.row, { gap: 10, flexWrap: 'wrap' }]}>
         <Button label="搜索地点" secondary onPress={() => setSearching(true)} />
         {current && <Button label="当前位置" secondary onPress={() => choose(current)} />}
-        {photoPlace && <Button label="照片拍摄地" secondary onPress={() => choose(photoPlace, true)} />}
+        {photoPlace && <Button label="照片拍摄地" secondary onPress={usePhoto} />}
       </View>
       <Modal visible={searching} animationType="slide" onRequestClose={() => setSearching(false)}>
         <SafeAreaView style={styles.screen}>

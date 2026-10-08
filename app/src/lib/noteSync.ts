@@ -48,7 +48,7 @@ export async function syncNotes(local: Entry[], apiUrl: string, token: string) {
           body: entry.body,
           place:
             entry.locationSource === 'photo'
-              ? photos.find((photo) => photo.place)?.place || entry.place
+              ? photos[entry.locationPhotoIndex ?? 0]?.place || photos.find((photo) => photo.place)?.place || entry.place
               : entry.place,
           photoIds: photos.map((photo) => photo.id),
           category: entry.category,
@@ -58,6 +58,8 @@ export async function syncNotes(local: Entry[], apiUrl: string, token: string) {
       });
       working[index] = {
         ...saved,
+        locationSource: entry.locationSource,
+        locationPhotoIndex: entry.locationPhotoIndex,
         photos: saved.photos.map((photo, i) => ({
           ...photo,
           uri: photos[i].uri,
@@ -98,7 +100,7 @@ export async function syncNotes(local: Entry[], apiUrl: string, token: string) {
           photos.push({ ...photo, uri: apiUrl + photo.remotePath });
         }
       }
-      const cached = { ...entry, photos };
+      const cached = { ...entry, photos, locationSource: previous?.locationSource, locationPhotoIndex: previous?.locationPhotoIndex };
       if (index >= 0) working[index] = cached;
       else working.push(cached);
     }
